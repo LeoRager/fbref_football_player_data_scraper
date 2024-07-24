@@ -1,4 +1,4 @@
 beautifulsoup4==4.12.2
 requests==2.30.0
 pandas==2.0.1
-urllib
+urllib3
