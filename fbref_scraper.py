@@ -14,18 +14,17 @@ European football leagues from the website fbref.com
 
 def get_data_info():
     # all possible leagues and seasons
-    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga']
-    seasons = ['2017-2018', '2018-2019', '2019-2020', '2020-2021', '2021-2022']
-    
+    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga', 'Big5', 'Eredivisie']
+
     while True:
         # select league [Premier League / La Liga / Serie A / Ligue 1 / Bundesliga]
-        league = input('Select League (Premier League / La Liga / Serie A / Ligue 1 / Bundesliga): ')
-        
+        league = input('Select League (Premier League / La Liga / Serie A / Ligue 1 / Bundesliga / Big5): ')
+
         # check if input valid
         if league not in leagues:
             print('League not valid, try again')
             continue
-            
+
         # assign url names and id's
         if league == 'Premier League':
             league = 'Premier-League'
@@ -46,20 +45,30 @@ def get_data_info():
         if league == 'Bundesliga':
             league = 'Bundesliga'
             league_id = '20'
+
+        if league == 'Big5':
+            league = 'Big-5-European-Leagues'
+            league_id = 'Big5'
+
+        if league == 'Eredivisie':
+            league = 'Eredivisie'
+            league_id = '23'
+
         break
-            
-    while True: 
+
+    while True:
         # select season after 2017 as XG only available from 2017,
-        season = input('Select Season (2017-2018, 2018-2019, 2019-2020, 2020-2021, 2021-2022): ')
-        
+        season = input('Select Season: ')
+
         # check if input valid
-        if season not in seasons:
+        if not re.match(r'^20\d{2}-20\d{2}$', season):
             print('Season not valid, try again')
             continue
         break
 
     url = f'https://fbref.com/en/comps/{league_id}/{season}/schedule/{season}-{league}-Scores-and-Fixtures'
-    return url, league, season
+    player_url = f'https://fbref.com/en/comps/{league_id}/{season}/stats/players/{season}-{league}-Stats'
+    return url, player_url, league, season
 
 
 def get_fixture_data(url, league, season):
@@ -67,36 +76,81 @@ def get_fixture_data(url, league, season):
     # create empty data frame and access all tables in url
     fixturedata = pd.DataFrame([])
     tables = pd.read_html(url)
-    
+
     # get fixtures
     fixtures = tables[0][['Wk', 'Day', 'Date', 'Time', 'Home', 'Away', 'xG', 'xG.1', 'Score']].dropna()
     fixtures['season'] = url.split('/')[6]
     fixturedata = pd.concat([fixturedata,fixtures])
-    
+
     # assign id for each game
     fixturedata["game_id"] = fixturedata.index
-    
+
     # export to csv file
-    fixturedata.reset_index(drop=True).to_csv(f'{league.lower()}_{season.lower()}_fixture_data.csv', 
+    fixturedata.reset_index(drop=True).to_csv(f'{league.lower()}_{season.lower()}_fixture_data.csv',
         header=True, index=False, mode='w')
     print('Fixture data collected...')
 
 
-def get_match_links(url, league):   
+def get_match_links(url, league):
     print('Getting player data...')
-    # access and download content from url containing all fixture links    
+    # access and download content from url containing all fixture links
     match_links = []
     html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
     links = soup(html.content, "html.parser").find_all('a')
-    
+
     # filter list to return only needed links
     key_words_good = ['/en/matches/', f'{league}']
     for l in links:
         href = l.get('href', '')
         if all(x in href for x in key_words_good):
-            if 'https://fbref.com' + href not in match_links:                 
+            if 'https://fbref.com' + href not in match_links:
                 match_links.append('https://fbref.com' + href)
     return match_links
+
+def my_player_data(player_url, league, season):
+    print('Getting player data from the stats page...')
+    try:
+        # Request the HTML page content
+        response = requests.get(player_url, headers={'User-Agent': 'Mozilla/5.0'})
+        response.raise_for_status()  # Raise an HTTPError for bad responses
+
+        # Parse the page content
+        print('Parsing the page content...')
+        page_soup = soup(response.content, "html.parser")
+
+        # Find the table with the id 'stats_standard'
+        table = page_soup.find('table', id='stats_standard')
+
+        # Use pandas to read the HTML table into a DataFrame
+        print('Reading the HTML table into a DataFrame...')
+        player_data = pd.read_html(str(table))[0]
+
+        # Drop multi-level column indexing if it exists
+        if isinstance(player_data.columns, pd.MultiIndex):
+            player_data.columns = player_data.columns.droplevel()
+
+        # Clean up DataFrame: remove unwanted rows and columns if necessary
+        # For example, removing rows where Player column is NaN
+        player_data = player_data[player_data['Player'].notna()]
+
+        # Drop all rows where 'Rk' is not a number
+        player_data = player_data[player_data['Rk'].str.isnumeric()]
+
+        # Set 'Rk' column as the index
+        player_data.set_index('Rk', inplace=True)
+
+        # Drop the 'Matches' column
+        player_data.drop('Matches', axis=1, inplace=True)
+
+        # Add the suffix 'p90' to the last 10 columns headers
+        player_data.columns = player_data.columns[:-10].tolist() + [col + '_p90' for col in player_data.columns[-10:]]
+
+        # Save the DataFrame to a CSV file
+        player_data.to_csv(f'{league.lower()}_{season.lower()}_player_stats.csv', header=True, index=False)
+
+        print(f'Player data for {season} season in {league} collected successfully.')
+    except Exception as e:
+        print(f'An error occurred while fetching player data: {e}')
 
 
 def player_data(match_links, league, season):
@@ -113,17 +167,17 @@ def player_data(match_links, league, season):
 
             # get player data
             def get_team_1_player_data():
-                # outfield and goal keeper data stored in seperate tables 
+                # outfield and goal keeper data stored in seperate tables
                 data_frames = [tables[3], tables[9]]
-                
+
                 # merge outfield and goal keeper data
-                df = reduce(lambda left, right: pd.merge(left, right, 
+                df = reduce(lambda left, right: pd.merge(left, right,
                     on=['Player', 'Nation', 'Age', 'Min'], how='outer'), data_frames).iloc[:-1]
-                
+
                 # assign a home or away value
                 return df.assign(home=1, game_id=count)
 
-            # get second teams  player data        
+            # get second teams  player data
             def get_team_2_player_data():
                 data_frames = [tables[10], tables[16]]
                 df = reduce(lambda left, right: pd.merge(left, right,
@@ -134,9 +188,9 @@ def player_data(match_links, league, season):
             t1 = get_team_1_player_data()
             t2 = get_team_2_player_data()
             player_data = pd.concat([player_data, pd.concat([t1,t2]).reset_index()])
-            
+
             print(f'{count+1}/{len(match_links)} matches collected')
-            player_data.to_csv(f'{league.lower()}_{season.lower()}_player_data.csv', 
+            player_data.to_csv(f'{league.lower()}_{season.lower()}_player_data.csv',
                 header=True, index=False, mode='w')
         except:
             print(f'{link}: error')
@@ -145,11 +199,11 @@ def player_data(match_links, league, season):
 
 
 # main function
-def main(): 
-    url, league, season = get_data_info()
-    get_fixture_data(url, league, season)
-    match_links = get_match_links(url, league)
-    player_data(match_links, league, season)
+def main():
+    url, player_url, league, season = get_data_info()
+    # get_fixture_data(url, league, season)
+    # match_links = get_match_links(url, league)
+    my_player_data(player_url, league, season)
 
     # checks if user wants to collect more data
     print('Data collected!')
