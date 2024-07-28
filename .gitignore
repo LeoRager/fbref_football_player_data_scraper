@@ -1,0 +1,5 @@
+# Ignore all CSV files
+*.csv
+
+# Ignore CSV files in all subdirectories
+**/*.csv
