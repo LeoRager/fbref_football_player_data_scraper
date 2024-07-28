@@ -6,6 +6,11 @@ import re
 from functools import reduce
 import sys
 from urllib.error import HTTPError
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 '''
 This program will get summary player data for each game played in the top 5 
@@ -14,11 +19,12 @@ European football leagues from the website fbref.com
 
 def get_data_info():
     # all possible leagues and seasons
-    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga', 'Big5', 'Eredivisie']
+    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga', 'Big5', 'Eredivisie', 'Primeira Liga']
 
     while True:
-        # select league [Premier League / La Liga / Serie A / Ligue 1 / Bundesliga]
-        league = input('Select League (Premier League / La Liga / Serie A / Ligue 1 / Bundesliga / Big5): ')
+        # Populate input for league naming what leagues are available
+        str_leagues = ', '.join(leagues)
+        league = input(f'Select League: {str_leagues}\n')
 
         # check if input valid
         if league not in leagues:
@@ -54,6 +60,10 @@ def get_data_info():
             league = 'Eredivisie'
             league_id = '23'
 
+        if league == 'Primeira Liga':
+            league = 'Primeira-Liga'
+            league_id = '32'
+
         break
 
     while True:
@@ -71,52 +81,28 @@ def get_data_info():
     return url, player_url, league, season
 
 
-def get_fixture_data(url, league, season):
-    print('Getting fixture data...')
-    # create empty data frame and access all tables in url
-    fixturedata = pd.DataFrame([])
-    tables = pd.read_html(url)
-
-    # get fixtures
-    fixtures = tables[0][['Wk', 'Day', 'Date', 'Time', 'Home', 'Away', 'xG', 'xG.1', 'Score']].dropna()
-    fixtures['season'] = url.split('/')[6]
-    fixturedata = pd.concat([fixturedata,fixtures])
-
-    # assign id for each game
-    fixturedata["game_id"] = fixturedata.index
-
-    # export to csv file
-    fixturedata.reset_index(drop=True).to_csv(f'{league.lower()}_{season.lower()}_fixture_data.csv',
-        header=True, index=False, mode='w')
-    print('Fixture data collected...')
-
-
-def get_match_links(url, league):
-    print('Getting player data...')
-    # access and download content from url containing all fixture links
-    match_links = []
-    html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
-    links = soup(html.content, "html.parser").find_all('a')
-
-    # filter list to return only needed links
-    key_words_good = ['/en/matches/', f'{league}']
-    for l in links:
-        href = l.get('href', '')
-        if all(x in href for x in key_words_good):
-            if 'https://fbref.com' + href not in match_links:
-                match_links.append('https://fbref.com' + href)
-    return match_links
-
-def my_player_data(player_url, league, season):
+def player_data(player_url, league, season):
     print('Getting player data from the stats page...')
     try:
-        # Request the HTML page content
-        response = requests.get(player_url, headers={'User-Agent': 'Mozilla/5.0'})
-        response.raise_for_status()  # Raise an HTTPError for bad responses
+        # Set up the Selenium WebDriver
+        driver = webdriver.Chrome()  # Or use webdriver.Firefox() for Firefox
+        driver.get(player_url)
 
-        # Parse the page content
+        # Wait until the specific element (table container) is loaded
+        try:
+            element_present = EC.presence_of_element_located((By.ID, 'div_stats_standard'))
+            WebDriverWait(driver, 10).until(element_present)
+        except TimeoutException:
+            print("Timed out waiting for page to load")
+            driver.quit()
+            return
+
+        # Get the page source after JavaScript has loaded content
+        html_content = driver.page_source
+
+        # Parse the page content with BeautifulSoup
         print('Parsing the page content...')
-        page_soup = soup(response.content, "html.parser")
+        page_soup = soup(html_content, "html.parser")
 
         # Find the table with the id 'stats_standard'
         table = page_soup.find('table', id='stats_standard')
@@ -134,88 +120,37 @@ def my_player_data(player_url, league, season):
         player_data = player_data[player_data['Player'].notna()]
 
         # Drop all rows where 'Rk' is not a number
-        player_data = player_data[player_data['Rk'].str.isnumeric()]
+        player_data = player_data[player_data['Rk'].astype(str).str.isnumeric()]
 
         # Set 'Rk' column as the index
         player_data.set_index('Rk', inplace=True)
 
-        # Drop the 'Matches' column
-        player_data.drop('Matches', axis=1, inplace=True)
+        # Drop the 'Matches' column if it exists
+        if 'Matches' in player_data.columns:
+            player_data.drop('Matches', axis=1, inplace=True)
 
         # Add the suffix 'p90' to the last 10 columns headers
         player_data.columns = player_data.columns[:-10].tolist() + [col + '_p90' for col in player_data.columns[-10:]]
 
         # Save the DataFrame to a CSV file
-        player_data.to_csv(f'{league.lower()}_{season.lower()}_player_stats.csv', header=True, index=False)
+        player_data.to_csv(f'./data/{league.lower()}_{season.lower()}_player_stats.csv', header=True, index=False)
 
         print(f'Player data for {season} season in {league} collected successfully.')
     except Exception as e:
         print(f'An error occurred while fetching player data: {e}')
-
-
-def player_data(match_links, league, season):
-    # loop through all fixtures
-    player_data = pd.DataFrame([])
-    for count, link in enumerate(match_links):
-        try:
-            tables = pd.read_html(link)
-            for table in tables:
-                try:
-                    table.columns = table.columns.droplevel()
-                except Exception:
-                    continue
-
-            # get player data
-            def get_team_1_player_data():
-                # outfield and goal keeper data stored in seperate tables
-                data_frames = [tables[3], tables[9]]
-
-                # merge outfield and goal keeper data
-                df = reduce(lambda left, right: pd.merge(left, right,
-                    on=['Player', 'Nation', 'Age', 'Min'], how='outer'), data_frames).iloc[:-1]
-
-                # assign a home or away value
-                return df.assign(home=1, game_id=count)
-
-            # get second teams  player data
-            def get_team_2_player_data():
-                data_frames = [tables[10], tables[16]]
-                df = reduce(lambda left, right: pd.merge(left, right,
-                    on=['Player', 'Nation', 'Age', 'Min'], how='outer'), data_frames).iloc[:-1]
-                return df.assign(home=0, game_id=count)
-
-            # combine both team data and export all match data to csv
-            t1 = get_team_1_player_data()
-            t2 = get_team_2_player_data()
-            player_data = pd.concat([player_data, pd.concat([t1,t2]).reset_index()])
-
-            print(f'{count+1}/{len(match_links)} matches collected')
-            player_data.to_csv(f'{league.lower()}_{season.lower()}_player_data.csv',
-                header=True, index=False, mode='w')
-        except:
-            print(f'{link}: error')
-        # sleep for 3 seconds after every game to avoid IP being blocked
-        time.sleep(3)
+    finally:
+        # Close the Selenium WebDriver
+        driver.quit()
 
 
 # main function
 def main():
     url, player_url, league, season = get_data_info()
-    # get_fixture_data(url, league, season)
-    # match_links = get_match_links(url, league)
-    my_player_data(player_url, league, season)
+    player_data(player_url, league, season)
 
-    # checks if user wants to collect more data
     print('Data collected!')
-    while True:
-        answer = input('Do you want to collect more data? (yes/no): ')
-        if answer == 'yes':
-            main()
-        if answer == 'no':
-            sys.exit()
-        else:
-            print('Answer not valid')
-            continue
+
+    return
 
 
 if __name__ == '__main__':
