@@ -19,7 +19,7 @@ European football leagues from the website fbref.com
 
 def get_data_info():
     # all possible leagues and seasons
-    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga', 'Big5', 'Eredivisie', 'Primeira Liga']
+    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga', 'Big5', 'Eredivisie', 'Primeira Liga', 'Serie B']
 
     while True:
         # Populate input for league naming what leagues are available
@@ -63,6 +63,10 @@ def get_data_info():
         if league == 'Primeira Liga':
             league = 'Primeira-Liga'
             league_id = '32'
+
+        if league == 'Serie B':
+            league = 'Serie-B'
+            league_id = '18'
 
         break
 
