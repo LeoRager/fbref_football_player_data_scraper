@@ -19,7 +19,7 @@ European football leagues from the website fbref.com
 
 def get_data_info():
     # all possible leagues and seasons
-    leagues = ['Premier League', 'La Liga', 'Serie A', 'Ligue 1', 'Bundesliga', 'Big5', 'Eredivisie', 'Primeira Liga', 'Serie B']
+    leagues = ['Big5', 'Eredivisie', 'Primeira Liga', 'Serie B']
 
     while True:
         # Populate input for league naming what leagues are available
@@ -32,41 +32,25 @@ def get_data_info():
             continue
 
         # assign url names and id's
-        if league == 'Premier League':
-            league = 'Premier-League'
-            league_id = '9'
-
-        if league == 'La Liga':
-            league = 'La-Liga'
-            league_id = '12'
-
-        if league == 'Serie A':
-            league = 'Serie-A'
-            league_id = '11'
-
-        if league == 'Ligue 1':
-            league = 'Ligue-1'
-            league_id = '13'
-
-        if league == 'Bundesliga':
-            league = 'Bundesliga'
-            league_id = '20'
-
         if league == 'Big5':
             league = 'Big-5-European-Leagues'
             league_id = 'Big5'
+            country = None
 
         if league == 'Eredivisie':
             league = 'Eredivisie'
             league_id = '23'
+            country = 'ne'
 
         if league == 'Primeira Liga':
             league = 'Primeira-Liga'
             league_id = '32'
+            country = 'pt'
 
         if league == 'Serie B':
             league = 'Serie-B'
             league_id = '18'
+            country = 'it'
 
         break
 
@@ -80,12 +64,12 @@ def get_data_info():
             continue
         break
 
-    url = f'https://fbref.com/en/comps/{league_id}/{season}/schedule/{season}-{league}-Scores-and-Fixtures'
+    # url = f'https://fbref.com/en/comps/{league_id}/{season}/schedule/{season}-{league}-Scores-and-Fixtures'
     player_url = f'https://fbref.com/en/comps/{league_id}/{season}/stats/players/{season}-{league}-Stats'
-    return url, player_url, league, season
+    return player_url, league, season, country
 
 
-def player_data(player_url, league, season):
+def player_data(player_url, league, season, country):
     print('Getting player data from the stats page...')
     try:
         # Set up the Selenium WebDriver
@@ -136,6 +120,10 @@ def player_data(player_url, league, season):
         # Add the suffix 'p90' to the last 10 columns headers
         player_data.columns = player_data.columns[:-10].tolist() + [col + '_p90' for col in player_data.columns[-10:]]
 
+        # If the 'Comp' column does not exist, insert it in position 4 and populate it with f'{country} {league}'
+        if 'Comp' not in player_data.columns:
+            player_data.insert(4, 'Comp', f'{country} {league}')
+
         # Save the DataFrame to a CSV file
         player_data.to_csv(f'./data/{league.lower()}_{season.lower()}_player_stats.csv', header=True, index=False)
 
@@ -149,8 +137,8 @@ def player_data(player_url, league, season):
 
 # main function
 def main():
-    url, player_url, league, season = get_data_info()
-    player_data(player_url, league, season)
+    player_url, league, season, country = get_data_info()
+    player_data(player_url, league, season,country)
 
     print('Data collected!')
 
