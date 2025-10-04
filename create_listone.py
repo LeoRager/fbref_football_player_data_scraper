@@ -20,7 +20,10 @@ def normalize_name(name):
     # Split the name into segments
     segments = name.strip().split()
 
-    # Determine the relevant segments based on the last segment
+    # Initialize the relevant_name variable
+    relevant_name = ""
+
+    # Check if the last segment ends with a period
     if segments and segments[-1].endswith('.'):
         if len(segments) > 1:
             # Keep the last and second-to-last segments
@@ -32,6 +35,10 @@ def normalize_name(name):
         # Otherwise, keep only the last segment
         relevant_name = segments[-1]
 
+    # Check if the first segment is "De" or "Di" and prepend it if necessary
+    if segments[0].lower() in ['de', 'di', 'el', 'van', 'la', 'le', 'al', 'del']:
+        relevant_name = f"{segments[0]} {relevant_name}"
+
     # Remove non-alphabetic characters (excluding spaces)
     cleaned_name = re.sub(r'[^a-zA-Z\s]', '', relevant_name)
 
@@ -41,7 +48,12 @@ def normalize_name(name):
 def extract_last_name(full_name):
     # Split the full name and take the last part as the last name
     parts = full_name.split()
-    return parts[-1]
+
+    # If the second last part is 'De' or 'Di' then keep the second to last and last part
+    if len(parts) > 1 and parts[-2].lower() in ['de', 'di', 'el', 'van', 'la', 'le', 'al', 'del']:
+        return f"{parts[-2]} {parts[-1]}"
+    else:
+        return parts[-1]
 
 
 def make_unique_names(df):
@@ -86,14 +98,19 @@ def create_dataframe(serie_a_df, all_players_df):
     merged_df = pd.merge(serie_a_df, all_players_df, left_on='Nome_normalized', right_on='unique_last_name', how='left')
 
     # Extract relevant columns
-    result_df = merged_df[['Nome', 'Player', 'Min']]
+    result_df = merged_df[['Nome', 'Player', 'R', 'Squadra', 'Squad', 'Comp', 'MP', 'Starts', 'Min', '90s', 'xG', 'npxG', 'xAG', 'xG_p90', 'npxG_p90', 'xAG_p90']].copy()
+
+    # Add expected bonus column
+    result_df['xB'] = (result_df['xG'] * 3) + result_df['xAG']
+    result_df['xB_p90'] = (result_df['xG_p90'] * 3) + result_df['xAG_p90']
+
     return result_df
 
 
 if __name__ == '__main__':
     # Open file dialogs to select the files
     serie_a_file_path = open_file()
-    all_players_file_path = './data/big-5-european-leagues_2023-2024_player_stats.csv'
+    all_players_file_path = 'combined_2023-2024.csv'
 
     # Load dataframes
     serie_a_df = pd.read_csv(serie_a_file_path)
@@ -101,4 +118,7 @@ if __name__ == '__main__':
 
     # Create the new dataframe with relevant information
     result_df = create_dataframe(serie_a_df, all_players_df)
+
+    # Save the new dataframe to a CSV file
+    result_df.to_csv('listone.csv', index=False)
 
